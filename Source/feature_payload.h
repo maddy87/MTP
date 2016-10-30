@@ -91,18 +91,25 @@ int  build_PERIODIC_MSG_PAYLOAD(uint8_t *);
 int  build_VID_ADVT_PAYLOAD(uint8_t *, char *);
 int  build_VID_CHANGE_PAYLOAD(uint8_t *, char *, char **, int);     // params - payload, interfacename, deleted VIDS, number of deleted VIDs
 bool isMain_VID_Table_Empty();
+bool isSec_VID_Table_Empty();
 int isChild(char *);
 
 /* Function Prototypes for MAIN VID Table Linked List */
 bool add_entry_LL(struct vid_addr_tuple *);
+bool add_entry_LL_root1(struct vid_addr_tuple *);
+bool add_entry_LL_root2(struct vid_addr_tuple *);
 bool find_entry_LL(struct vid_addr_tuple *);
+bool find_entry_LL_root1(struct vid_addr_tuple *);
+bool find_entry_LL_root2(struct vid_addr_tuple *);
 void print_entries_LL();
+void print_entries_sec_LL();
 bool update_hello_time_LL(struct ether_addr *);
 struct vid_addr_tuple* getInstance_vid_tbl_LL();
 bool delete_entry_LL(char *);
 
 /* Function Prototypes for BKP VID Table Linked List */
 void print_entries_bkp_LL();
+void print_entries_sec_bkp_LL();
 
 /* Function Prototypes for CPVID table information */
 bool add_entry_cpvid_LL(struct child_pvid_tuple *);

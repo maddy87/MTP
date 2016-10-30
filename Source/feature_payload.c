@@ -3,6 +3,7 @@
 
 /* file locals */
 struct vid_addr_tuple *main_vid_tbl_head = NULL;
+struct vid_addr_tuple *secondary_vid_tbl_head = NULL; //Node Information about Secondary VID Table
 //struct vid_addr_tuple *bkp_vid_tbl_head = NULL; // we can maintain backup paths in Main VID Table only, just a thought
 struct child_pvid_tuple *cpvid_tbl_head = NULL; 
 struct local_bcast_tuple *local_bcast_head = NULL;
@@ -19,11 +20,12 @@ struct local_bcast_tuple *local_bcast_head = NULL;
  *   0 	- if VID is parent ID of one of the VID's in the main VID Table.
  *  -1  - if VID is not child of any of the VID's in the main VID Table.
  *
+ *   Rajesh Shetty : Updated Code to check Root1 Main VID and BackupVID
  */
 
 int isChild(char *vid) {
 
-	// For now just checking only the Main VID table.
+	// For now just checking only the Roo1/Main VID table.
 	if (main_vid_tbl_head != NULL) {
 		struct vid_addr_tuple *current = main_vid_tbl_head;
 
@@ -48,7 +50,36 @@ int isChild(char *vid) {
 			} 
 			current = current->next;
 		}
-	} 
+	}
+
+
+  // Checking the Root2 VID table.
+  if (secondary_vid_tbl_head != NULL) {
+    struct vid_addr_tuple *current = secondary_vid_tbl_head;
+
+    while (current != NULL){
+      int lenInputVID = strlen(vid);
+      int lenCurrentVID = strlen(current->vid_addr);
+
+      // This check is mainly if we get a parent ID, we have eliminate this as the VID is a parent ID.
+      if (lenCurrentVID > lenInputVID && strncmp(current->vid_addr, vid, lenInputVID) == 0) {
+        lenCurrentVID = lenInputVID;
+
+        return 0;
+      }
+
+      // if length is same and are similar then its a duplicate no need to add.
+      if ((lenInputVID == lenCurrentVID) && (strncmp(vid, current->vid_addr, lenCurrentVID)==0)) {
+
+        return 2;
+      }
+
+      if (strncmp(vid, current->vid_addr, lenCurrentVID)==0) {
+        return 1;
+      }
+      current = current->next;
+    }
+  }
 	return -1;
 }
 
@@ -60,7 +91,7 @@ int isChild(char *vid) {
  *
  *   @output
  *   payloadLen
- *
+ *   //Rajesh Shetty : Updated Code to check Root2 Secondary Root VID and BackupVID
  */
 
 // Message ordering <MSG_TYPE> <OPERATION> <NUMBER_VIDS>  <PATH COST> <VID_ADDR_LEN> <MAIN_TABLE_VID + EGRESS PORT> 
@@ -70,6 +101,8 @@ int  build_VID_ADVT_PAYLOAD(uint8_t *data, char *interface) {
   int egressPort = 0;
 
   struct vid_addr_tuple *current = main_vid_tbl_head;
+  //Adding teh Root 2 / Secondary VID table
+  struct vid_addr_tuple *root2 = secondary_vid_tbl_head;
 
   // Port from where VID request came.
   int i;
@@ -78,6 +111,8 @@ int  build_VID_ADVT_PAYLOAD(uint8_t *data, char *interface) {
       egressPort = (egressPort * 10) + (interface[i] - 48);
     }
   }
+
+  //Original Code to get all the entries from the MAIN VID Table and
 
   while (current != NULL) {
     char vid_addr[VID_ADDR_LEN];
@@ -110,7 +145,46 @@ int  build_VID_ADVT_PAYLOAD(uint8_t *data, char *interface) {
     /* VID Advts should not be more than 3, because we need to advertise only the entries that are in Main VID Table
        from 3 we consider every path as backup path. */
     if (numAdvts >=3 ) {
+        printf("Getting out of Loop 1");
         break;
+    }
+  }
+
+  ///Rajesh Shetty : Updated by code to get entries from SECONDARY or ROOT2 vid table
+
+  while (root2 != NULL) {
+    printf("Inside out of Loop 2");
+    char vid_addr[VID_ADDR_LEN];
+
+    // <PATH COST> - Taken as '1' for now
+    data[payloadLen] = (uint8_t) (root2->path_cost + 1);
+
+    // next byte
+    payloadLen = payloadLen + 1;
+
+    memset(vid_addr, '\0', VID_ADDR_LEN);
+    if (strncmp(interface, root2->eth_name, strlen(interface)) == 0) {
+      sprintf(vid_addr, "%s", root2->vid_addr );
+    } else {
+      sprintf(vid_addr, "%s.%d", root2->vid_addr, egressPort );
+    }
+
+    // <VID_ADDR_LEN>
+    data[payloadLen] = strlen(vid_addr);
+
+    // next byte
+    payloadLen = payloadLen + 1;
+
+    memcpy(&data[payloadLen], vid_addr, strlen(vid_addr));
+
+    payloadLen += strlen(vid_addr);
+    root2 = root2->next;
+    numAdvts++;
+
+    // VID Advts should not be more than 3, because we need to advertise from the Root2 VID Table Also from 3 we consider every path as backup path.
+    if (numAdvts >=6 ) {
+      printf("Getting out of Loop 2");
+      break;
     }
   }
 
@@ -267,53 +341,132 @@ bool isMain_VID_Table_Empty() {
   return true;
 }
 
+/*
+ *   isSec_VID_Table_Empty -     Check if Secondary/Root2 VID Table is empty.
+ *
+ *   @input
+ *   no params
+ *
+ *   @return
+ *   true  	- if Sec/Root2 VID Table is empty.
+ *   false 	- if Sec/Root2 VID Table is not null.
+ */
+
+// Message ordering <MSG_TYPE>
+bool isSec_VID_Table_Empty() {
+
+  if (secondary_vid_tbl_head) {
+    return false;
+  }
+
+  return true;
+}
+
 /**
  * 		Add into the VID Table, new VID's are added based on the path cost.
  *     		VID Table,		Implemented Using linked list. 
  * 		Head Ptr,		*vid_table
  * 		@return 
  * 		true 			Successful Addition
- * 		false 			Failure to add/ Already exists.		 	
+ * 		false 			Failure to add/ Already exists.
+ * 		Rajesh Shetty : Updated the code to include Addition in Root1 and Root2 Tables
 **/
 
 bool add_entry_LL(struct vid_addr_tuple *node) {
-	struct vid_addr_tuple *current = main_vid_tbl_head;
-	// If the entry is not already present, we add it.
-	if (!find_entry_LL(node)) {
-		if (main_vid_tbl_head == NULL) {
-				node->membership = 1;
-				main_vid_tbl_head = node;
-		} else {
-			struct vid_addr_tuple *previous = NULL;
-			
-			int mship = 0;	
-			// place in accordance with cost, lowest to highest.
-			while(current!=NULL && (current->path_cost < node->path_cost)) {
-				previous = current;
-				mship = current->membership;
-				current = current->next;
-			}
 
-			// if new node has lowest cost.
-			if (previous == NULL) {
-				node->next = main_vid_tbl_head;
-				node->membership = 1;
-				main_vid_tbl_head = node;
-			} else {
-				previous->next = node;
-				node->next = current;
-				node->membership = (mship + 1);
-			}
+    printf("\n Main :Addling Node  %s", node->vid_addr);
 
-			// Increment the membership IDs of other VID's
-			while (current != NULL) {
-				current->membership++;
-				current = current->next;
-			}
-		}
-		return true;
-	}
-	return false;
+    char *vid_addr_temp = node->vid_addr;
+    if(vid_addr_temp[0] == '1'){
+      printf("\n\nadding to main_vid_tbl_node as root :  %s\n\n", vid_addr_temp);
+      return add_entry_LL_root1(node);
+    }else{
+      printf("\n\nadding to sec_vid_tbl_node as root :  %s\n\n", vid_addr_temp);
+      return add_entry_LL_root2(node);
+    }
+	//return false;
+}
+//bool add_entry_LL(struct vid_addr_tuple *node) {
+bool add_entry_LL_root1(struct vid_addr_tuple *node) {
+
+  printf("In Root1 : Addling Node %s", node->vid_addr);
+  struct vid_addr_tuple *current = main_vid_tbl_head;
+  // If the entry is not already present, we add it.
+  if (!find_entry_LL_root1(node)) {
+    if (main_vid_tbl_head == NULL) {
+      node->membership = 1;
+      main_vid_tbl_head = node;
+    } else {
+      struct vid_addr_tuple *previous = NULL;
+
+      int mship = 0;
+      // place in accordance with cost, lowest to highest.
+      while(current!=NULL && (current->path_cost < node->path_cost)) {
+        previous = current;
+        mship = current->membership;
+        current = current->next;
+      }
+  // if new node has lowest cost.
+      if (previous == NULL) {
+        node->next = main_vid_tbl_head;
+        node->membership = 1;
+        main_vid_tbl_head = node;
+      } else {
+        previous->next = node;
+        node->next = current;
+        node->membership = (mship + 1);
+      }
+
+      // Increment the membership IDs of other VID's
+      while (current != NULL) {
+        current->membership++;
+        current = current->next;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
+bool add_entry_LL_root2(struct vid_addr_tuple *node) {
+
+  printf("In Root 2 : Addling Node  %s", node->vid_addr);
+  struct vid_addr_tuple *current = secondary_vid_tbl_head;
+  // If the entry is not already present, we add it.
+  if (!find_entry_LL_root2(node)) {
+    if (secondary_vid_tbl_head == NULL) {
+      node->membership = 1;
+      secondary_vid_tbl_head = node;
+    } else {
+      struct vid_addr_tuple *previous = NULL;
+
+      int mship = 0;
+      // place in accordance with cost, lowest to highest.
+      while(current!=NULL && (current->path_cost < node->path_cost)) {
+        previous = current;
+        mship = current->membership;
+        current = current->next;
+      }
+      // if new node has lowest cost.
+      if (previous == NULL) {
+        node->next = secondary_vid_tbl_head;
+        node->membership = 1;
+        secondary_vid_tbl_head = node;
+      } else {
+        previous->next = node;
+        node->next = current;
+        node->membership = (mship + 1);
+      }
+
+      // Increment the membership IDs of other VID's
+      while (current != NULL) {
+        current->membership++;
+        current = current->next;
+      }
+    }
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -327,7 +480,7 @@ bool add_entry_LL(struct vid_addr_tuple *node) {
 **/
 
 bool find_entry_LL(struct vid_addr_tuple *node) {
-	if (main_vid_tbl_head != NULL) {
+     if (main_vid_tbl_head != NULL) {
 		struct vid_addr_tuple *current = main_vid_tbl_head;
 		while (current != NULL) {
 			if (strcmp(current->vid_addr, node->vid_addr) == 0) {
@@ -340,6 +493,40 @@ bool find_entry_LL(struct vid_addr_tuple *node) {
 	}
 	return false;	
 }
+
+
+//Updates for individual Networks
+
+bool find_entry_LL_root1(struct vid_addr_tuple *node) {
+  if (main_vid_tbl_head != NULL) {
+    struct vid_addr_tuple *current = main_vid_tbl_head;
+    while (current != NULL) {
+      if (strcmp(current->vid_addr, node->vid_addr) == 0) {
+        // Update time stamp.
+        current->last_updated = time(0);
+        return true;
+      }
+      current = current->next;
+    }
+  }
+  return false;
+}
+
+bool find_entry_LL_root2(struct vid_addr_tuple *node) {
+  if (secondary_vid_tbl_head != NULL) {
+    struct vid_addr_tuple *current = secondary_vid_tbl_head;
+    while (current != NULL) {
+      if (strcmp(current->vid_addr, node->vid_addr) == 0) {
+        // Update time stamp.
+        current->last_updated = time(0);
+        return true;
+      }
+      current = current->next;
+    }
+  }
+  return false;
+}
+
 
 /**
  *		Print VID Table.
@@ -354,10 +541,36 @@ void print_entries_LL() {
   struct vid_addr_tuple *current;
   int tracker = MAX_MAIN_VID_TBL_PATHS;
 
-  printf("\n#######Main VID Table#########\n");
+  printf("\n#######Root 1/Main VID Table#########\n");
   printf("MT_VID\t\t\t\tEthname\t\t\tPath Cost\tMembership\tMAC\n");
 
   for (current = main_vid_tbl_head; current != NULL; current = current->next) {
+    if (tracker <= 0) {
+      break;
+    } else {
+      printf("%s\t\t\t\t%s\t\t\t%d\t\t%d\t\t%s\n", current->vid_addr, current->eth_name, current->path_cost, current->membership, ether_ntoa(&current->mac) );
+      tracker--;
+    }
+  }
+}
+
+/**
+ *		Print Secondary VID Table.
+ *      	VID Table,		Implemented Using linked list.
+ * 		Head Ptr,		*vid_table
+ *
+ *		@return
+ *		void
+**/
+
+void print_entries_sec_LL() {
+  struct vid_addr_tuple *current;
+  int tracker = MAX_MAIN_VID_TBL_PATHS;
+
+  printf("\n#######Root 2/Secondary VID Table#########\n");
+  printf("MT_VID\t\t\t\tEthname\t\t\tPath Cost\tMembership\tMAC\n");
+
+  for (current = secondary_vid_tbl_head; current != NULL; current = current->next) {
     if (tracker <= 0) {
       break;
     } else {
@@ -386,6 +599,16 @@ bool update_hello_time_LL(struct ether_addr *mac) {
       hasUpdates = true;
     }	
   }
+
+  //If not found in the main_vid_table
+  //if(!hasUpdates){
+    for (current = secondary_vid_tbl_head; current != NULL; current = current->next) {
+      if (memcmp(&current->mac, mac, sizeof (struct ether_addr))==0) {
+        current->last_updated = time(0);
+        hasUpdates = true;
+      }
+    }
+  //}
   return hasUpdates;
 }
 
@@ -400,10 +623,13 @@ bool update_hello_time_LL(struct ether_addr *mac) {
 
 int checkForFailures(char **deletedVIDs) {
   struct vid_addr_tuple *current = main_vid_tbl_head;
+  struct vid_addr_tuple *root2 = secondary_vid_tbl_head;
   struct vid_addr_tuple *previous = NULL;
+  struct vid_addr_tuple *previous2 = NULL;
   time_t currentTime = time(0);
   int numberOfFailures = 0;
 
+  //Checking for Failures in Main VID/Root1 VID Table
   while (current != NULL) {
     if ((current->last_updated !=-1) &&(currentTime - current->last_updated) > (3 * PERIODIC_HELLO_TIME) ) {
       struct vid_addr_tuple *temp = current;
@@ -423,13 +649,41 @@ int checkForFailures(char **deletedVIDs) {
     current = current->next;
   }
 
+  //Checking for failures in Root2
+  //currentTime = time(0);
+
+  while (root2 != NULL) {
+    if ((root2->last_updated !=-1) &&(currentTime - root2->last_updated) > (3 * PERIODIC_HELLO_TIME) ) {
+      struct vid_addr_tuple *temp = root2;
+      deletedVIDs[numberOfFailures] = (char*)calloc(strlen(temp->vid_addr), sizeof(char));
+      if (previous2 == NULL) {
+        secondary_vid_tbl_head	= root2->next;
+      } else {
+        previous2->next = root2->next;
+      }
+      strncpy(deletedVIDs[numberOfFailures], temp->vid_addr, strlen(temp->vid_addr));
+      root2 = root2->next;
+      numberOfFailures++;
+      free(temp);
+      continue;
+    }
+    previous2 = root2;
+    root2 = root2->next;
+  }
+
   // if failures are there
   if (numberOfFailures > 0) {
     int membership = 1;
+
     for (current = main_vid_tbl_head; current != NULL; current = current->next) {
       current->membership = membership;
       membership++;
     }
+    for (root2 = secondary_vid_tbl_head; root2 != NULL; root2 = root2->next) {
+      root2->membership = membership;
+      membership++;
+    }
+
   }
   return numberOfFailures;
 }
@@ -446,9 +700,12 @@ int checkForFailures(char **deletedVIDs) {
 
 bool delete_entry_LL(char *vid_to_delete) {
   struct vid_addr_tuple *current = main_vid_tbl_head;
+  struct vid_addr_tuple *root2 = secondary_vid_tbl_head; // Including changes for Main VID Table
   struct vid_addr_tuple *previous = NULL;
+  struct vid_addr_tuple *previous2 = NULL;
   bool hasDeletions = false;
 
+  //Changes for Root1/Main VID Table
   while (current != NULL) {
     if (strncmp(vid_to_delete, current->vid_addr, strlen(vid_to_delete)) == 0) {
       struct vid_addr_tuple *temp = current;
@@ -468,11 +725,41 @@ bool delete_entry_LL(char *vid_to_delete) {
     current = current->next;
   }
 
+  //If not found in Main VID/Root1 VID
+  if(!hasDeletions){
+    //Check For Root VID Table Changes
+    while (root2 != NULL) {
+      if (strncmp(vid_to_delete, root2->vid_addr, strlen(vid_to_delete)) == 0) {
+        struct vid_addr_tuple *temp = root2;
+
+        if (previous2 == NULL) {
+          secondary_vid_tbl_head = root2->next;
+        } else {
+          previous2->next = root2->next;
+        }
+
+        root2 = root2->next;
+        hasDeletions = true;
+        free(temp);
+        continue;
+      }
+      previous2 = root2;
+      root2 = root2->next;
+    }
+
+  }
+
   // fix any wrong membership values.
   if (hasDeletions) {
     int membership = 1;
     for (current = main_vid_tbl_head; current != NULL; current = current->next) {
       current->membership = membership;
+      membership++;
+    }
+    //Update the membership for Root2/Sec VID Table
+    membership=1;
+    for (root2 = secondary_vid_tbl_head; root2 != NULL; root2 = root2->next) {
+      root2->membership = membership;
       membership++;
     }
   }
@@ -494,7 +781,7 @@ struct vid_addr_tuple* getInstance_vid_tbl_LL() {
 }
 
 /**
- *    Print VID Table.
+ *    Print VID Table for ROOT 1
  *    Backup VID Paths,    Implemented Using linked list, instead of maintaining a seperate table, I am adding Main VIDS and Backup Paths
  *                         in the same table. 
  *    Head Ptr,   *vid_table  
@@ -507,7 +794,7 @@ void print_entries_bkp_LL() {
   struct vid_addr_tuple *current;
   int tracker = MAX_MAIN_VID_TBL_PATHS;
 
-  printf("\n#######Backup VID Table#########\n");
+  printf("\n#######Root 1 Overflow VID Table#########\n");
   printf("MT_VID\t\t\t\tEthname\t\t\tPath Cost\tMembership\tMAC\n");
 
   for (current = main_vid_tbl_head; current != NULL; current = current->next) {
@@ -518,6 +805,34 @@ void print_entries_bkp_LL() {
     }
   }
 }
+
+
+/**
+ *    Print VID Table for ROOT 2
+ *    Backup VID Paths,    Implemented Using linked list, instead of maintaining a seperate table, I am adding Main VIDS and Backup Paths
+ *                         in the same table.
+ *    Head Ptr,   *vid_table
+ *
+ *    @return
+ *    void
+**/
+
+void print_entries_sec_bkp_LL() {
+  struct vid_addr_tuple *current;
+  int tracker = MAX_MAIN_VID_TBL_PATHS;
+
+  printf("\n#######Root 2 Overflow VID Table#########\n");
+  printf("MT_VID\t\t\t\tEthname\t\t\tPath Cost\tMembership\tMAC\n");
+
+  for (current = secondary_vid_tbl_head; current != NULL; current = current->next) {
+    if (tracker <= 0) {
+      printf("%s\t\t\t\t%s\t\t\t%d\t\t%d\t\t%s\n", current->vid_addr, current->eth_name, current->path_cost, current->membership, ether_ntoa(&current->mac) );
+    } else {
+      tracker--;
+    }
+  }
+}
+
 
 /**
  *    Add into the Child PVID Table.
@@ -531,16 +846,20 @@ void print_entries_bkp_LL() {
 bool add_entry_cpvid_LL(struct child_pvid_tuple *node) {
   if (cpvid_tbl_head == NULL) {
     cpvid_tbl_head = node;
+    printf("Added entry %s", node->vid_addr);
     return true;
   } else if (update_entry_cpvid_LL(node))  {      // if already, there and there is PVID change.
-    
+     printf("Updated entry %s", node->vid_addr);
+    ///return true;
   } else {
     if (!find_entry_cpvid_LL(node)) {
       node->next = cpvid_tbl_head;
       cpvid_tbl_head = node;
+      printf("Found and added entry %s", node->vid_addr);
       return true;
     }
   }
+  printf("NOT ADDED entry %s", node->vid_addr);
   return false;
 }
 
@@ -699,6 +1018,7 @@ bool update_hello_time_cpvid_LL(struct ether_addr *mac) {
       isUpdated = true;
     }
   }
+
   return isUpdated;
 }
 
