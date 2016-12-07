@@ -90,6 +90,7 @@ int  build_JOIN_MSG_PAYLOAD(uint8_t *);
 int  build_PERIODIC_MSG_PAYLOAD(uint8_t *);
 int  build_VID_ADVT_PAYLOAD(uint8_t *, char *);
 int  build_VID_CHANGE_PAYLOAD(uint8_t *, char *, char **, int);     // params - payload, interfacename, deleted VIDS, number of deleted VIDs
+int  getSecPVIDLen();
 bool isMain_VID_Table_Empty();
 bool isSec_VID_Table_Empty();
 int isChild(char *);
@@ -113,13 +114,21 @@ void print_entries_sec_bkp_LL();
 
 /* Function Prototypes for CPVID table information */
 bool add_entry_cpvid_LL(struct child_pvid_tuple *);
+bool add_entry_sec_cpvid_LL(struct child_pvid_tuple *);
 bool find_entry_cpvid_LL(struct child_pvid_tuple *);
+bool find_entry_sec_cpvid_LL(struct child_pvid_tuple *);
 void print_entries_cpvid_LL();
+void print_entries_sec_cpvid_LL();
 struct child_pvid_tuple* getInstance_cpvid_LL();
+struct child_pvid_tuple* getInstance_sec_cpvid_LL();
 bool delete_entry_cpvid_LL(char *);
+bool delete_entry_sec_cpvid_LL(char *);
 bool delete_MACentry_cpvid_LL(struct ether_addr *);
+bool delete_MACentry_sec_cpvid_LL(struct ether_addr *);
 bool update_hello_time_cpvid_LL(struct ether_addr *);
+bool update_hello_time_sec_cpvid_LL(struct ether_addr *);
 bool update_entry_cpvid_LL(struct child_pvid_tuple *);
+bool update_entry_sec_cpvid_LL(struct child_pvid_tuple *);
 
 /* Function Prototypes for Local host broadcast information */
 bool add_entry_lbcast_LL(struct local_bcast_tuple *);
@@ -134,3 +143,18 @@ int checkForFailures(char **);
 bool checkForFailuresCPVID();
 //bool isInterfaceActive(char *);
 #endif /* FT_PYL_H */
+
+/** Check if the root switch is complete */
+void performRootSwitch();
+bool checkRootSwitch();
+
+/* Log Resutls Of Root*/
+void openLogsFile();
+void logResults();
+void logResultsConvergence();
+void logResultsCreation();
+void closeLogsFile();
+void startCreationTime();
+void startConvergenceTime();
+
+

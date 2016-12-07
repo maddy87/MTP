@@ -5,8 +5,15 @@
 struct vid_addr_tuple *main_vid_tbl_head = NULL;
 struct vid_addr_tuple *secondary_vid_tbl_head = NULL; //Node Information about Secondary VID Table
 //struct vid_addr_tuple *bkp_vid_tbl_head = NULL; // we can maintain backup paths in Main VID Table only, just a thought
-struct child_pvid_tuple *cpvid_tbl_head = NULL; 
+struct child_pvid_tuple *cpvid_tbl_head = NULL;
+struct child_pvid_tuple *cpvid_sec_tbl_head = NULL;
 struct local_bcast_tuple *local_bcast_head = NULL;
+bool isRootSwitched = false;
+FILE *logs;
+struct timeval treeCreationStart;
+struct timeval treeConvergenceStart;
+
+
 
 /*
  *   isChild() - This method checks if the input VID param is child of any VID in Main 
@@ -75,12 +82,32 @@ int isChild(char *vid) {
       }
 
       if (strncmp(vid, current->vid_addr, lenCurrentVID)==0) {
+          printf("\n From ROOT 2: printing vid and current vid %s %s\n",vid, current->vid_addr);
         return 1;
       }
       current = current->next;
     }
   }
 	return -1;
+}
+
+/***
+ * Returns the PVID Length of the Sec Root Table.
+ * @param data
+ * @param interface
+ * @return
+ */
+int getSecPVIDLen(){
+    int len =0;
+    struct vid_addr_tuple *current = secondary_vid_tbl_head;
+
+    if (current == NULL){
+        return len;
+    }
+    else {
+        len = strlen(current->vid_addr) + 2;
+    }
+    return len;
 }
 
 
@@ -864,6 +891,36 @@ bool add_entry_cpvid_LL(struct child_pvid_tuple *node) {
 }
 
 /**
+ *    Add into the Child PVID Table.
+ *    Child PVID Table,    Implemented Using linked list.
+ *    Head Ptr,   *cpvid_tbl_head
+ *    @return
+ *    true      Successful Addition
+ *    false     Failure to add/ Already exists.
+**/
+
+bool add_entry_sec_cpvid_LL(struct child_pvid_tuple *node) {
+    if (cpvid_sec_tbl_head == NULL) {
+        cpvid_sec_tbl_head = node;
+        printf("Added entry %s", node->vid_addr);
+        return true;
+    } else if (update_entry_sec_cpvid_LL(node))  {      // if already, there and there is PVID change.
+        printf("Updated entry %s", node->vid_addr);
+        ///return true;
+    } else {
+        if (!find_entry_sec_cpvid_LL(node)) {
+            node->next = cpvid_sec_tbl_head;
+            cpvid_sec_tbl_head = node;
+            printf("Found and added entry %s", node->vid_addr);
+            return true;
+        }
+    }
+    printf("NOT ADDED entry %s", node->vid_addr);
+    return false;
+}
+
+
+/**
  *    Check if the VID entry is already present in the table.
  *    Child PVID Table,  Implemented Using linked list.
  *    Head Ptr,   *cpvid_tbl_head
@@ -892,6 +949,37 @@ bool find_entry_cpvid_LL(struct child_pvid_tuple *node) {
 }
 
 /**
+ *    Check if the VID entry is already present in the table.
+ *    SECONDARY Child PVID Table,  Implemented Using linked list.
+ *    Head Ptr,   *cpvid_tbl_head
+ *    @return
+ *    true      Element Found.
+ *    false     Element Not Found.
+**/
+
+bool find_entry_sec_cpvid_LL(struct child_pvid_tuple *node) {
+    struct child_pvid_tuple *current = cpvid_sec_tbl_head;
+
+    if (current != NULL) {
+
+        while (current != NULL) {
+
+            if (strcmp(current->vid_addr, node->vid_addr) == 0) {
+
+                return true;
+            }
+
+            current = current->next;
+        }
+    }
+
+    return false;
+}
+
+
+
+
+/**
  *    Print Child PVID  Table.
  *    Child PVID Table,    Implemented Using linked list.
  *    Head Ptr,   *cpvid_tbl_head
@@ -903,12 +991,33 @@ bool find_entry_cpvid_LL(struct child_pvid_tuple *node) {
 void print_entries_cpvid_LL() {
   struct child_pvid_tuple *current;
 
-  printf("\n#######Child PVID Table#########\n");
+  printf("\n#######ROOT 1/MAIN Child PVID Table#########\n");
   printf("Child PVID\t\tPORT\t\t\tMAC\n");
 
   for (current = cpvid_tbl_head; current != NULL; current = current->next) {
     printf("%s\t\t\t%s\t\t\t%s\n", current->vid_addr, current->child_port, ether_ntoa(&current->mac) );
   }
+}
+
+
+/**
+ *    Print SECONDARY Child PVID  Table.
+ *    Child PVID Table,    Implemented Using linked list.
+ *    Head Ptr,   *cpvid_tbl_head
+ *
+ *    @return
+ *    void
+**/
+
+void print_entries_sec_cpvid_LL() {
+    struct child_pvid_tuple *current;
+
+    printf("\n####### ROOT 2/SECONDARY Child PVID Table#########\n");
+    printf("Child PVID\t\tPORT\t\t\tMAC\n");
+
+    for (current = cpvid_sec_tbl_head; current != NULL; current = current->next) {
+        printf("%s\t\t\t%s\t\t\t%s\n", current->vid_addr, current->child_port, ether_ntoa(&current->mac) );
+    }
 }
 
 /**
@@ -923,6 +1032,20 @@ void print_entries_cpvid_LL() {
 struct child_pvid_tuple* getInstance_cpvid_LL() {
 
   return cpvid_tbl_head;
+}
+
+/**
+ *    Get instance of SECONDARY child of PVID Table.
+ *    Child PVID Table,    Implemented Using linked list.
+ *    Head Ptr,   *cpvid_tbl_head
+ *
+ *    @return
+ *    struct child_pvid_tuple* - return reference of child pvid table.
+**/
+
+struct child_pvid_tuple* getInstance_sec_cpvid_LL() {
+
+    return cpvid_sec_tbl_head;
 }
 
 /**
@@ -959,8 +1082,75 @@ bool delete_entry_cpvid_LL(char *cpvid_to_be_deleted) {
     previous = current;
     current = current->next;
   }
+
+  //If not found in Root1 Child PVID Table check for Instances in Root2 CPVID Table
+  if(!hasDeletions){
+      struct child_pvid_tuple *current = cpvid_sec_tbl_head;
+      struct child_pvid_tuple *previous = NULL;
+      //bool hasDeletions = false;
+
+      while (current != NULL) {
+          if (strncmp(cpvid_to_be_deleted, current->vid_addr, strlen(cpvid_to_be_deleted)) == 0) {
+              struct child_pvid_tuple *temp = current;
+
+              if (previous == NULL) {
+                  cpvid_sec_tbl_head = current->next;
+              } else {
+                  previous->next = current->next;
+              }
+
+              current = current->next;
+              free(temp);
+              hasDeletions = true;
+              continue;
+          }
+          previous = current;
+          current = current->next;
+      }
+
+
+  }
+
   return hasDeletions;
 }
+
+/**
+ *    Delete any SECONDARY Child PVID's matching this VID.
+ *    Child PVID Table,    Implemented Using linked list.
+ *    Head Ptr,   *cpvid_tbl_head
+ *
+ *    @input
+ *    char * - cpvid to be deleted.
+ *    @return
+ *    struct child_pvid_tuple* - return reference of child pvid table.
+**/
+
+bool delete_entry_sec_cpvid_LL(char *cpvid_to_be_deleted) {
+    struct child_pvid_tuple *current = cpvid_sec_tbl_head;
+    struct child_pvid_tuple *previous = NULL;
+    bool hasDeletions = false;
+
+    while (current != NULL) {
+        if (strncmp(cpvid_to_be_deleted, current->vid_addr, strlen(cpvid_to_be_deleted)) == 0) {
+            struct child_pvid_tuple *temp = current;
+
+            if (previous == NULL) {
+                cpvid_sec_tbl_head = current->next;
+            } else {
+                previous->next = current->next;
+            }
+
+            current = current->next;
+            free(temp);
+            hasDeletions = true;
+            continue;
+        }
+        previous = current;
+        current = current->next;
+    }
+    return hasDeletions;
+}
+
 
 /**
  *    Delete any Child PVID's matching this VID.
@@ -1000,6 +1190,44 @@ bool delete_MACentry_cpvid_LL(struct ether_addr *mac) {
 }
 
 /**
+ *    Delete SECONDARY any Child PVID's matching this VID.
+ *    Child PVID Table,    Implemented Using linked list.
+ *    Head Ptr,   *cpvid_tbl_head
+ *
+ *    @input
+ *    char * - cpvid to be deleted.
+ *    @return
+ *    struct child_pvid_tuple* - return reference of child pvid table.
+**/
+
+bool delete_MACentry_sec_cpvid_LL(struct ether_addr *mac) {
+    struct child_pvid_tuple *current = cpvid_sec_tbl_head;
+    struct child_pvid_tuple *previous = NULL;
+    bool hasDeletions = false;
+
+    while (current != NULL) {
+        if (memcmp(mac, &current->mac, sizeof(struct ether_addr)) == 0) {
+            struct child_pvid_tuple *temp = current;
+
+            if (previous == NULL) {
+                cpvid_sec_tbl_head = current->next;
+            } else {
+                previous->next = current->next;
+            }
+
+            current = current->next;
+            free(temp);
+            hasDeletions = true;
+            continue;
+        }
+        previous = current;
+        current = current->next;
+    }
+    return hasDeletions;
+}
+
+
+/**
  *              Update timestamp for a MAC address on both CPVID Table and backup table.
  *              Child PVID Table,       Implemented Using linked list.
  *              Head Ptr,               *cpvid_tbl_head
@@ -1011,16 +1239,37 @@ bool delete_MACentry_cpvid_LL(struct ether_addr *mac) {
 bool update_hello_time_cpvid_LL(struct ether_addr *mac) {
   struct child_pvid_tuple *current;
   bool isUpdated = false;
-
   for (current = cpvid_tbl_head; current != NULL; current = current->next) {
     if (memcmp(&current->mac, mac, sizeof (struct ether_addr))==0) {
       current->last_updated = time(0);
       isUpdated = true;
     }
   }
-
   return isUpdated;
 }
+
+/**
+ *              Update timestamp for a MAC address on both SECONDARY CPVID Table and backup table.
+ *              Child PVID Table,       Implemented Using linked list.
+ *              Head Ptr,               *cpvid_tbl_head
+ *
+ *              @return
+ *              void
+**/
+
+bool update_hello_time_sec_cpvid_LL(struct ether_addr *mac) {
+    struct child_pvid_tuple *current;
+    bool isUpdated = false;
+    for (current = cpvid_sec_tbl_head; current != NULL; current = current->next) {
+        if (memcmp(&current->mac, mac, sizeof (struct ether_addr))==0) {
+            current->last_updated = time(0);
+            isUpdated = true;
+        }
+    }
+    return isUpdated;
+}
+
+
 
 /**
  *              Update timestamp for a MAC address on both CPVID Table.
@@ -1043,6 +1292,31 @@ bool update_entry_cpvid_LL(struct child_pvid_tuple *node) {
   }
   return false;
 }
+
+
+
+/**
+ *              Update timestamp for a MAC address on both CPVID Table.
+ *              SECONDARY Child PVID Table,       Implemented Using linked list.
+ *              Head Ptr,               *cpvid_tbl_head
+ *
+ *              @return
+ *              void
+**/
+
+bool update_entry_sec_cpvid_LL(struct child_pvid_tuple *node) {
+    struct child_pvid_tuple *current;
+
+    for (current = cpvid_sec_tbl_head; current != NULL; current = current->next) {
+        if (memcmp(&current->mac, &node->mac, sizeof(struct ether_addr)) == 0) {
+            memset(current->vid_addr, '\0', VID_ADDR_LEN);
+            strncpy(current->vid_addr, node->vid_addr, strlen(node->vid_addr));
+            return true;
+        }
+    }
+    return false;
+}
+
 
 /**
  *              Check for link Failures.
@@ -1192,4 +1466,72 @@ bool delete_entry_lbcast_LL(char *port) {
 
 struct local_bcast_tuple* getInstance_lbcast_LL() {
   return local_bcast_head;
+}
+
+/*
+ * Check if Root has been switched
+ */
+
+void performRootSwitch(){
+    printf("\n\n Performing Root Switch From Root1 to Root 2 \n\n");
+    isRootSwitched = true;
+}
+bool checkRootSwitch(){
+   return isRootSwitched;
+}
+
+
+
+/**
+ * LOG RESULTS into the file for tree Creation
+ */
+void logResultsCreation(){
+
+    time_t currTime;
+    char timeString[26];
+    struct tm* currTimeDetailed;
+    time(&currTime);
+    currTimeDetailed = localtime(&currTime);
+    strftime(timeString, 26, "%Y-%m-%d %H:%M:%S", currTimeDetailed);
+    char sysname[1024];
+    char buffer[26];
+    float diff;
+    struct timeval curr;
+    gettimeofday(&curr,0);
+    diff = (curr.tv_sec - treeCreationStart.tv_sec)*1000.0f + (curr.tv_usec - treeCreationStart.tv_usec) / 1000.0f;
+    gethostname(sysname, 1024);
+    fprintf(logs,"%s,%s,%f",sysname,buffer,diff);
+}
+
+
+/**
+ * LOG RESULTS into the file for tree Creation
+ */
+void logResultsConvergence(){
+
+}
+
+/***
+ * Open Logs File
+ */
+void openLogsFile(){
+    logs = fopen("../logs/logs.txt","w");
+}
+
+/***
+ * CLose Logs File
+ */
+void closeLogsFile(){
+    fclose(logs);
+}
+
+/***
+ * Starting the creation time
+ */
+void startCreationTime(){
+    gettimeofday(&treeCreationStart,0);
+}
+
+void startConvergenceTime(){
+    gettimeofday(&treeConvergenceStart,0);
 }

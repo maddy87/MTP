@@ -51,12 +51,18 @@ void sig_handler(int signo);
 /* Globals */
 bool isRoot = false;
 bool isSecondaryRoot = false;
+bool startLoggingCreation = false;
+char sysname[1024];
+
 int rootPriority = 0; //Indicates the root priority of the application ( 1 => Primary, 2 => Secondary)
 struct interface_tracker_t *interfaceTracker = NULL;
+struct timeval currentTime;
+struct timeval tcStart;
 
 /* Entry point to the program */
 int main (int argc, char** argv) {	
 	char **interfaceNames;
+
 
 	// Check number of Arguments.
 	if (argc < 3) {
@@ -81,7 +87,8 @@ int main (int argc, char** argv) {
         }
 	}
 	else printf("This node is a non-root MTS\n");
-	
+    /* Opening the file for writing the code */
+    openLogsFile();
 
 
 	// Populate local host broadcast table, intially we mark all ports as host ports, if we get a MTP CTRL frame from any port we remove it.
@@ -89,6 +96,7 @@ int main (int argc, char** argv) {
 	memset(interfaceNames, '\0', sizeof(char) * MAX_INTERFACES * MAX_INTERFACES);
 	int numberOfInterfaces = getActiveInterfaces(interfaceNames);
     printf("\nNumber of Interfaces\n");
+    gethostname(sysname, 1024);
 
 	int i = 0;
 	for (; i < numberOfInterfaces; i++) {
@@ -167,6 +175,10 @@ void mtp_start() {
 	// time_t, timers for checking hello time.
 	time_t time_advt_beg;
 	time_t time_advt_fin;
+    //time snapshots for recording convergence;
+    //time convergence start
+    time_t time_conv_start;
+    time_t time_conv_end;
 
 	// clear the memory
 	interfaceNames = (char**) calloc (MAX_INTERFACES* MAX_INTERFACES, sizeof(char));
@@ -254,8 +266,7 @@ void mtp_start() {
 						ctrlSend(c1->eth_name, payload, payloadLen);
 					}
 					free(payload);
-				} 
-
+				}
 			}
 
 			// print all tables.
@@ -275,6 +286,26 @@ void mtp_start() {
 
 		recv_len = recvfrom(sockCtrl, recvBuffer, MAX_BUFFER_SIZE, MSG_DONTWAIT, (struct sockaddr*) &src_addr, &addr_len);
 		if (recv_len > 0) {
+
+            //Start convergence time.
+            if(!startLoggingCreation){
+                gettimeofday(&tcStart ,0);
+                float diff;
+                struct timeval curr;
+                gettimeofday(&curr,0);
+                diff = (curr.tv_sec - tcStart.tv_sec)*1000.0f + (curr.tv_usec - tcStart.tv_usec) / 1000.0f;
+                time_t currTime;
+                char timeString[26];
+                struct tm* currTimeDetailed;
+                time(&currTime);
+                currTimeDetailed = localtime(&currTime);
+                strftime(timeString, 26, "%Y-%m-%d %H:%M:%S", currTimeDetailed);
+                printf("%s,%s,%f",sysname,timeString,diff);
+                startLoggingCreation = true;
+
+            }
+
+
 			char recvOnEtherPort[5];
 			// read ethernet header
 			eheader = (struct ether_header*)recvBuffer;
@@ -296,7 +327,8 @@ void mtp_start() {
 			switch ( recvBuffer[14] ) {
 				case MTP_TYPE_JOIN_MSG:
 					{
-						uint8_t *payload = NULL;
+
+                        uint8_t *payload = NULL;
 						int payloadLen = 0;
 
 						payload = (uint8_t*) calloc (1, MAX_BUFFER_SIZE);
@@ -314,8 +346,11 @@ void mtp_start() {
 					break;
 				case MTP_TYPE_PERODIC_MSG:
 					{
-						// printf ("MTP_TYPE_PERODIC_MSG\n");
+
+
+                        // printf ("MTP_TYPE_PERODIC_MSG\n");
 						// Record MAC ADDRESS, if not already present.
+
 						struct ether_addr src_mac;
 						bool retMainVID, retCPVID; 
 
@@ -341,6 +376,8 @@ void mtp_start() {
 					break;
 				case MTP_TYPE_VID_ADVT:
 					{
+
+
 						//printf ("MTP_TYPE_VID_ADVT\n");
 						// Got VID Advt, check relationship, if child add to Child PVID Table.
 						// Number of VIDs
@@ -377,6 +414,7 @@ void mtp_start() {
 								// if VID child ignore, incase part of PVID add to Child PVID table. 
 								if ( ret == 1) {
 									// if this is the first VID in the table and is a child, we have to add into child PVID Table
+
 									printf("numberVIDS %d recvBuffer %d ", numberVIDS, recvBuffer[16] );
 									if (numberVIDS == (uint8_t) recvBuffer[16] ) { // if same first ID
 										struct child_pvid_tuple *new_cpvid = (struct child_pvid_tuple *) calloc(1,
@@ -400,7 +438,8 @@ void mtp_start() {
 
 									//Update the childs to Secondary Root CPVID.
 									else{
-										if(isSecondaryRoot){
+										//if(isSecondaryRoot){
+											printf("\n Starting to Add :  %s\n\n", vid_addr);
 											struct child_pvid_tuple *new_cpvid = (struct child_pvid_tuple*) calloc (1, sizeof(struct child_pvid_tuple));
 											// Fill data.
 											strncpy(new_cpvid->vid_addr, vid_addr, strlen(vid_addr));
@@ -408,17 +447,22 @@ void mtp_start() {
 											memcpy(&new_cpvid->mac, (struct ether_addr *)&eheader->ether_shost, sizeof(struct ether_addr));
 											new_cpvid->next = NULL;
 											new_cpvid->last_updated = time(0);        // last updated time
-
 											char *vid_addr_temp = new_cpvid->vid_addr;
-											if(vid_addr_temp[0] == '2' && strlen(vid_addr_temp)==3){
+											printf("\n vid_add_temp :  %s\n\n", vid_addr_temp);
+											printf("\n len :  %zu\n\n", strlen(vid_addr_temp));
+
+											//Get the PVID of the Secondary Table
+											int pVID_len = getSecPVIDLen();
+											printf("\n len :  %d\n\n", pVID_len);
+											if(vid_addr_temp[0] == '2' && strlen(vid_addr_temp)==pVID_len){
 												printf("\n adding from secondary root:  %s\n\n", vid_addr_temp);
-												if (add_entry_cpvid_LL(new_cpvid)) {
+												if (add_entry_sec_cpvid_LL(new_cpvid)) {
 													printf("\nAddded node %s\n",new_cpvid->vid_addr);
 												} else { // if already there deallocate node memory
 													free(new_cpvid);
 												}
  											}
-										}
+										//}
 									}
 								} else if ( ret == -1) { 
 									// Add to Main VID Table, if not a child, make it PVID if there is no better path already in the table.
@@ -477,6 +521,9 @@ void mtp_start() {
 						} else if (operation == VID_DEL){
 							//printf ("GOT VID_DEL\n");
 							// Message ordering <MSG_TYPE> <OPERATION> <NUMBER_VIDS> <VID_ADDR_LEN> <MAIN_TABLE_VID + EGRESS PORT>
+                            //Initialize the convergence start to
+
+                            time(&time_conv_start);
 							uint8_t numberVIDS = (uint8_t) recvBuffer[16];
 
 							// delete all local entries, get a list and send to others who derive from this VID. 
@@ -532,17 +579,43 @@ void mtp_start() {
 									}
 									free(payload);
 								}
+								///If main VID Table is EMPTY then perform ROOT SWITCH
+								if(isMain_VID_Table_Empty()){
+
+									performRootSwitch();
+                                    time(&time_conv_end);
+								}
 							}
 
 						} else {
 							printf("Unknown VID Advertisment\n");
 						}
+
+                        float diff;
+                        struct timeval curr;
+                        gettimeofday(&curr,0);
+                        diff = (curr.tv_sec - tcStart.tv_sec)*1000.0f + (curr.tv_usec - tcStart.tv_usec) / 1000.0f;
+                        //gethostname(sysname, 1024);
+
 						print_entries_LL();
                         print_entries_sec_LL();                 //SECONDARY VID TABLE
 						print_entries_bkp_LL();
                         print_entries_sec_bkp_LL();
                         print_entries_cpvid_LL();
-						print_entries_lbcast_LL(); 
+						print_entries_sec_cpvid_LL();
+						print_entries_lbcast_LL();
+
+
+                        time_t currTime;
+                        char timeString[26];
+                        struct tm* currTimeDetailed;
+                        time(&currTime);
+                        currTimeDetailed = localtime(&currTime);
+                        strftime(timeString, 26, "%Y-%m-%d %H:%M:%S", currTimeDetailed);
+                        printf("Logging the results");
+                        printf("%s , %s, %f ",sysname,timeString,diff);
+                        printf("\n");
+
 					} 
 					break;
 				default:
@@ -588,8 +661,17 @@ void mtp_start() {
 					}
 				}
 
+				//If Root has switched From Root1 to Root2 Send to all
+				//ports on the Secondary Root Child PVID table
+				struct child_pvid_tuple* cpt;
+				if(checkRootSwitch()){
+					cpt = getInstance_sec_cpvid_LL();
+				}else{
+					cpt = getInstance_cpvid_LL();
+				}
+
 				// Next, Send to all ports on Child PVID Table.
-				struct child_pvid_tuple* cpt = getInstance_cpvid_LL();
+				//struct child_pvid_tuple* cpt = getInstance_cpvid_LL();
 
 				for (; cpt != NULL; cpt = cpt->next) {
 					// port should not be the same from where it received frame.
