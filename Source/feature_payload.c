@@ -1385,17 +1385,13 @@ bool find_entry_lbcast_LL(struct local_bcast_tuple *node) {
   struct local_bcast_tuple *current = local_bcast_head;
 
   if (current != NULL) {
-
     while (current != NULL) {
-
       if (strcmp(current->eth_name, node->eth_name) == 0) {
         return true;
       }
-
       current = current->next;
     }
   }
-
   return false;
 }
 
@@ -1468,10 +1464,9 @@ struct local_bcast_tuple* getInstance_lbcast_LL() {
   return local_bcast_head;
 }
 
-/*
+/**
  * Check if Root has been switched
  */
-
 void performRootSwitch(){
     printf("\n\n Performing Root Switch From Root1 to Root 2 \n\n");
     isRootSwitched = true;
@@ -1479,8 +1474,6 @@ void performRootSwitch(){
 bool checkRootSwitch(){
    return isRootSwitched;
 }
-
-
 
 /**
  * LOG RESULTS into the file for tree Creation

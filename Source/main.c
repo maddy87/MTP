@@ -58,6 +58,7 @@ int rootPriority = 0; //Indicates the root priority of the application ( 1 => Pr
 struct interface_tracker_t *interfaceTracker = NULL;
 struct timeval currentTime;
 struct timeval tcStart;
+struct timeval rootCStart;
 
 /* Entry point to the program */
 int main (int argc, char** argv) {	
@@ -88,7 +89,7 @@ int main (int argc, char** argv) {
 	}
 	else printf("This node is a non-root MTS\n");
     /* Opening the file for writing the code */
-    openLogsFile();
+    //openLogsFile();
 
 
 	// Populate local host broadcast table, intially we mark all ports as host ports, if we get a MTP CTRL frame from any port we remove it.
@@ -277,6 +278,44 @@ void mtp_start() {
                 print_entries_sec_bkp_LL();             // ROOT2  VID TABLE
 				print_entries_cpvid_LL();               // CHILD PVID TABLE
 				print_entries_lbcast_LL();              // LOCAL HOST PORTS
+                gettimeofday(&rootCStart,0);
+                if(isMain_VID_Table_Empty()){
+                    //Check if the current MTS is the Secondary root.
+                    if(isSecondaryRoot){
+                        //Log the time indicating start of Root convergence.
+                        float diff;
+                        struct timeval curr;
+                        gettimeofday(&curr,0);
+                        diff = (curr.tv_sec - tcStart.tv_sec)*1000.0f + (curr.tv_usec - tcStart.tv_usec) / 1000.0f;
+                        time_t currTime;
+                        char timeString[26];
+                        struct tm* currTimeDetailed;
+                        time(&currTime);
+                        currTimeDetailed = localtime(&currTime);
+                        strftime(timeString, 26, "%Y-%m-%d %H:%M:%S", currTimeDetailed);
+                        printf("Root Convergence Started");
+                        printf("%s , %s, %f ",sysname,timeString,diff);
+                        printf("\n");
+                    }
+                    float diff;
+                    struct timeval currRoot;
+                    gettimeofday(&currRoot,0);
+                    diff = (currRoot.tv_sec - rootCStart.tv_sec)*1000.0f + (currRoot.tv_usec - rootCStart.tv_usec) / 1000.0f;
+                    time_t currTime;
+                    char timeString[26];
+                    struct tm* currTimeDetailed;
+                    time(&currTime);
+                    currTimeDetailed = localtime(&currTime);
+                    strftime(timeString, 26, "%Y-%m-%d %H:%M:%S", currTimeDetailed);
+                    printf("Performing Root-Convergence");
+                    printf("%s , %s, %f ",sysname,timeString,diff);
+                    printf("\n");
+                    //Mark the start of Root Convergence
+                    //performRootSwitch();
+                    //performRootSwitch();
+                    time(&time_conv_end);
+                }
+
 			}
 			// reset time.
 			time(&time_advt_beg);
@@ -286,25 +325,6 @@ void mtp_start() {
 
 		recv_len = recvfrom(sockCtrl, recvBuffer, MAX_BUFFER_SIZE, MSG_DONTWAIT, (struct sockaddr*) &src_addr, &addr_len);
 		if (recv_len > 0) {
-
-            //Start convergence time.
-            if(!startLoggingCreation){
-                gettimeofday(&tcStart ,0);
-                float diff;
-                struct timeval curr;
-                gettimeofday(&curr,0);
-                diff = (curr.tv_sec - tcStart.tv_sec)*1000.0f + (curr.tv_usec - tcStart.tv_usec) / 1000.0f;
-                time_t currTime;
-                char timeString[26];
-                struct tm* currTimeDetailed;
-                time(&currTime);
-                currTimeDetailed = localtime(&currTime);
-                strftime(timeString, 26, "%Y-%m-%d %H:%M:%S", currTimeDetailed);
-                printf("%s,%s,%f",sysname,timeString,diff);
-                startLoggingCreation = true;
-
-            }
-
 
 			char recvOnEtherPort[5];
 			// read ethernet header
@@ -323,6 +343,9 @@ void mtp_start() {
 				// This is a MTP frame so, incase this port is in Local host broadcast table remove it.
 				delete_entry_lbcast_LL(recvOnEtherPort); 
 			}
+
+            //Start convergence time.
+
 
 			switch ( recvBuffer[14] ) {
 				case MTP_TYPE_JOIN_MSG:
@@ -383,6 +406,24 @@ void mtp_start() {
 						// Number of VIDs
 						// Message ordering <MSG_TYPE> <OPERATION> <NUMBER_VIDS>  <PATH COST> <VID_ADDR_LEN> <MAIN_TABLE_VID + EGRESS PORT>
 						uint8_t operation = (uint8_t) recvBuffer[15];
+
+
+                        if(!startLoggingCreation){
+                            gettimeofday(&tcStart ,0);
+                            float diff;
+                            struct timeval curr;
+                            gettimeofday(&curr,0);
+                            diff = (curr.tv_sec - tcStart.tv_sec)*1000.0f + (curr.tv_usec - tcStart.tv_usec) / 1000.0f;
+                            time_t currTime;
+                            char timeString[26];
+                            struct tm* currTimeDetailed;
+                            time(&currTime);
+                            currTimeDetailed = localtime(&currTime);
+                            strftime(timeString, 26, "%Y-%m-%d %H:%M:%S", currTimeDetailed);
+                            printf("Initializing Start Time %s,%s,%f",sysname,timeString,diff);
+                            startLoggingCreation = true;
+
+                        }
 
 						if (operation == VID_ADD) { 
 							uint8_t numberVIDS = (uint8_t) recvBuffer[16];
@@ -580,9 +621,41 @@ void mtp_start() {
 									free(payload);
 								}
 								///If main VID Table is EMPTY then perform ROOT SWITCH
+                                gettimeofday(&rootCStart,0);
 								if(isMain_VID_Table_Empty()){
-
-									performRootSwitch();
+                                    //Check if the current MTS is the Secondary root.
+                                    if(isSecondaryRoot){
+                                        //Log the time indicating start of Root convergence.
+                                        float diff;
+                                        struct timeval curr;
+                                        gettimeofday(&curr,0);
+                                        diff = (curr.tv_sec - tcStart.tv_sec)*1000.0f + (curr.tv_usec - tcStart.tv_usec) / 1000.0f;
+                                        time_t currTime;
+                                        char timeString[26];
+                                        struct tm* currTimeDetailed;
+                                        time(&currTime);
+                                        currTimeDetailed = localtime(&currTime);
+                                        strftime(timeString, 26, "%Y-%m-%d %H:%M:%S", currTimeDetailed);
+                                        printf("Root Convergence Started");
+                                        printf("%s , %s, %f ",sysname,timeString,diff);
+                                        printf("\n");
+                                    }
+                                    float diff;
+                                    struct timeval currRoot;
+                                    gettimeofday(&currRoot,0);
+                                    diff = (currRoot.tv_sec - rootCStart.tv_sec)*1000.0f + (currRoot.tv_usec - rootCStart.tv_usec) / 1000.0f;
+                                    time_t currTime;
+                                    char timeString[26];
+                                    struct tm* currTimeDetailed;
+                                    time(&currTime);
+                                    currTimeDetailed = localtime(&currTime);
+                                    strftime(timeString, 26, "%Y-%m-%d %H:%M:%S", currTimeDetailed);
+                                    printf("Performing Root-Convergence");
+                                    printf("%s , %s, %f ",sysname,timeString,diff);
+                                    printf("\n");
+                                    //Mark the start of Root Convergence
+                                    //performRootSwitch();
+                                    performRootSwitch();
                                     time(&time_conv_end);
 								}
 							}
@@ -604,7 +677,6 @@ void mtp_start() {
                         print_entries_cpvid_LL();
 						print_entries_sec_cpvid_LL();
 						print_entries_lbcast_LL();
-
 
                         time_t currTime;
                         char timeString[26];
